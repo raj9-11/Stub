@@ -1,42 +1,29 @@
-name: Generate & Build MarketStub
+name: Scaffold MarketStub
 
 on:
-  push:
-    branches:
-      - main
+  workflow_dispatch:
 
 jobs:
-  build:
+  scaffold:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. Checkout the (empty) repository
-      - name: Checkout repository
+      # 1) Checkout with write rights
+      - name: Checkout repo
         uses: actions/checkout@v4
-
-      # 2. Set up Java 17 + cache Gradle
-      - name: Set up JDK 17
-        uses: actions/setup-java@v4
         with:
-          distribution: temurin
-          java-version: '17'
-          cache: gradle
+          persist-credentials: true
 
-      # 3. Install system Gradle (needed to generate wrapper)
-      - name: Install Gradle CLI
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y gradle
-
-      # 4. Scaffold the Android stub project
-      - name: Scaffold MarketStub project
+      # 2) Create all required files/folders
+      - name: Scaffold files
         run: |
           set -e
-          # create module & wrapper dirs
+
+          # Make directories
           mkdir -p app/src/main/java/com/yourcompany/marketstub
           mkdir -p gradle/wrapper
 
-          ## settings.gradle with pluginManagement
+          # settings.gradle w/ pluginManagement
           cat > settings.gradle << 'EOF'
           pluginManagement {
             repositories {
@@ -49,34 +36,32 @@ jobs:
           include(":app")
           EOF
 
-          ## root build.gradle declares the AGP plugin and wrapper task
+          # Root build.gradle (declares AGP and wrapper)
           cat > build.gradle << 'EOF'
           plugins {
             id "com.android.application" version "8.2.0" apply false
           }
-          
           subprojects {
             repositories {
               google()
               mavenCentral()
             }
           }
-          
           task wrapper(type: Wrapper) {
-            gradleVersion = "8.4"
+            gradleVersion = "8.6"
           }
           EOF
 
-          ## wrapper properties (v8.4)
+          # Gradle wrapper props
           cat > gradle/wrapper/gradle-wrapper.properties << 'EOF'
           distributionBase=GRADLE_USER_HOME
           distributionPath=wrapper/dists
           zipStoreBase=GRADLE_USER_HOME
           zipStorePath=wrapper/dists
-          distributionUrl=https\://services.gradle.org/distributions/gradle-8.4-bin.zip
+          distributionUrl=https://services.gradle.org/distributions/gradle-8.6-bin.zip
           EOF
 
-          ## app module build.gradle
+          # App module build.gradle
           cat > app/build.gradle << 'EOF'
           apply plugin: 'com.android.application'
 
@@ -90,9 +75,7 @@ jobs:
               versionName = "1.0"
             }
             buildTypes {
-              release {
-                minifyEnabled false
-              }
+              release { minifyEnabled false }
             }
           }
 
@@ -101,7 +84,7 @@ jobs:
           }
           EOF
 
-          ## AndroidManifest.xml
+          # AndroidManifest.xml
           cat > app/src/main/AndroidManifest.xml << 'EOF'
           <manifest xmlns:android="http://schemas.android.com/apk/res/android"
               package="com.yourcompany.marketstub">
@@ -120,7 +103,7 @@ jobs:
           </manifest>
           EOF
 
-          ## Java source
+          # Java source
           cat > app/src/main/java/com/yourcompany/marketstub/MarketStubActivity.java << 'EOF'
           package com.yourcompany.marketstub;
 
@@ -145,21 +128,17 @@ jobs:
           }
           EOF
 
-      # 5. Generate the Gradle wrapper scripts + jar
-      - name: Generate Gradle wrapper
-        run: gradle wrapper
-
-      # 6. Make the wrapper executable
-      - name: Make Gradlew executable
-        run: chmod +x ./gradlew
-
-      # 7. Clean & build the Release APK
-      - name: Assemble Release APK
-        run: ./gradlew clean app:assembleRelease --no-daemon
-
-      # 8. Upload the resulting APK
-      - name: Upload APK Artifact
-        uses: actions/upload-artifact@v4
+      # 3) Commit & push the new files
+      - name: Commit files
+        uses: EndBug/add-and-commit@v9
         with:
-          name: MarketStub-${{ github.run_number }}.apk
-          path: app/build/outputs/apk/release/app-release.apk
+          author_name: "github-actions[bot]"
+          author_email: "github-actions[bot]@users.noreply.github.com"
+          message: "chore: scaffold MarketStub project"
+          add: |
+            settings.gradle
+            build.gradle
+            gradle/wrapper/gradle-wrapper.properties
+            app/build.gradle
+            app/src/main/AndroidManifest.xml
+            app/src/main/java/com/yourcompany/marketstub/MarketStubActivity.java
