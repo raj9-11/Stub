@@ -10,11 +10,11 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1) Checkout (empty) repo
+      # 1. Checkout the (empty) repository
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 2) Install JDK 17 and cache Gradle
+      # 2. Set up Java 17 + cache Gradle
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
@@ -22,47 +22,61 @@ jobs:
           java-version: '17'
           cache: gradle
 
-      # 3) Install Gradle CLI (for wrapper generation)
+      # 3. Install system Gradle (needed to generate wrapper)
       - name: Install Gradle CLI
         run: |
           sudo apt-get update
           sudo apt-get install -y gradle
 
-      # 4) Scaffold the Android stub project entirely in the workspace
+      # 4. Scaffold the Android stub project
       - name: Scaffold MarketStub project
         run: |
           set -e
-
-          # Create folders
+          # create module & wrapper dirs
           mkdir -p app/src/main/java/com/yourcompany/marketstub
           mkdir -p gradle/wrapper
 
-          # Root settings.gradle
+          ## settings.gradle with pluginManagement
           cat > settings.gradle << 'EOF'
+          pluginManagement {
+            repositories {
+              gradlePluginPortal()
+              google()
+              mavenCentral()
+            }
+          }
           rootProject.name = "MarketStub"
-          include ":app"
+          include(":app")
           EOF
 
-          # Root build.gradle (defines wrapper task)
+          ## root build.gradle declares the AGP plugin and wrapper task
           cat > build.gradle << 'EOF'
           plugins {
-            id 'com.android.application' version '8.1.0' apply false
+            id "com.android.application" version "8.2.0" apply false
           }
+          
+          subprojects {
+            repositories {
+              google()
+              mavenCentral()
+            }
+          }
+          
           task wrapper(type: Wrapper) {
-            gradleVersion = '8.2'
+            gradleVersion = "8.4"
           }
           EOF
 
-          # Gradle wrapper properties
+          ## wrapper properties (v8.4)
           cat > gradle/wrapper/gradle-wrapper.properties << 'EOF'
           distributionBase=GRADLE_USER_HOME
           distributionPath=wrapper/dists
           zipStoreBase=GRADLE_USER_HOME
           zipStorePath=wrapper/dists
-          distributionUrl=https://services.gradle.org/distributions/gradle-8.2-bin.zip
+          distributionUrl=https\://services.gradle.org/distributions/gradle-8.4-bin.zip
           EOF
 
-          # App module build.gradle
+          ## app module build.gradle
           cat > app/build.gradle << 'EOF'
           apply plugin: 'com.android.application'
 
@@ -83,11 +97,11 @@ jobs:
           }
 
           dependencies {
-            // no external dependencies
+            // no external deps
           }
           EOF
 
-          # AndroidManifest.xml
+          ## AndroidManifest.xml
           cat > app/src/main/AndroidManifest.xml << 'EOF'
           <manifest xmlns:android="http://schemas.android.com/apk/res/android"
               package="com.yourcompany.marketstub">
@@ -106,7 +120,7 @@ jobs:
           </manifest>
           EOF
 
-          # MarketStubActivity.java
+          ## Java source
           cat > app/src/main/java/com/yourcompany/marketstub/MarketStubActivity.java << 'EOF'
           package com.yourcompany.marketstub;
 
@@ -131,19 +145,19 @@ jobs:
           }
           EOF
 
-      # 5) Generate the Gradle wrapper (scripts + jar)
+      # 5. Generate the Gradle wrapper scripts + jar
       - name: Generate Gradle wrapper
         run: gradle wrapper
 
-      # 6) Make the Gradle wrapper executable
+      # 6. Make the wrapper executable
       - name: Make Gradlew executable
         run: chmod +x ./gradlew
 
-      # 7) Build the Release APK
+      # 7. Clean & build the Release APK
       - name: Assemble Release APK
         run: ./gradlew clean app:assembleRelease --no-daemon
 
-      # 8) Upload the built APK as an artifact
+      # 8. Upload the resulting APK
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
