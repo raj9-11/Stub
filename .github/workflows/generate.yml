@@ -1,29 +1,32 @@
 name: Scaffold MarketStub
 
+# manual trigger
 on:
   workflow_dispatch:
+
+# grant write access to the repo contents
+permissions:
+  contents: write
 
 jobs:
   scaffold:
     runs-on: ubuntu-latest
 
     steps:
-      # 1) Checkout with write rights
+      # 1) Checkout and keep credentials so we can push commits
       - name: Checkout repo
         uses: actions/checkout@v4
         with:
           persist-credentials: true
 
-      # 2) Create all required files/folders
+      # 2) Scaffold all stub-app files/dirs
       - name: Scaffold files
         run: |
           set -e
-
-          # Make directories
           mkdir -p app/src/main/java/com/yourcompany/marketstub
           mkdir -p gradle/wrapper
 
-          # settings.gradle w/ pluginManagement
+          # settings.gradle
           cat > settings.gradle << 'EOF'
           pluginManagement {
             repositories {
@@ -36,7 +39,7 @@ jobs:
           include(":app")
           EOF
 
-          # Root build.gradle (declares AGP and wrapper)
+          # root build.gradle
           cat > build.gradle << 'EOF'
           plugins {
             id "com.android.application" version "8.2.0" apply false
@@ -52,7 +55,7 @@ jobs:
           }
           EOF
 
-          # Gradle wrapper props
+          # gradle wrapper props
           cat > gradle/wrapper/gradle-wrapper.properties << 'EOF'
           distributionBase=GRADLE_USER_HOME
           distributionPath=wrapper/dists
@@ -61,7 +64,7 @@ jobs:
           distributionUrl=https://services.gradle.org/distributions/gradle-8.6-bin.zip
           EOF
 
-          # App module build.gradle
+          # app/build.gradle
           cat > app/build.gradle << 'EOF'
           apply plugin: 'com.android.application'
 
@@ -103,7 +106,7 @@ jobs:
           </manifest>
           EOF
 
-          # Java source
+          # MarketStubActivity.java
           cat > app/src/main/java/com/yourcompany/marketstub/MarketStubActivity.java << 'EOF'
           package com.yourcompany.marketstub;
 
@@ -128,8 +131,8 @@ jobs:
           }
           EOF
 
-      # 3) Commit & push the new files
-      - name: Commit files
+      # 3) Commit & push the scaffolded files
+      - name: Commit scaffold
         uses: EndBug/add-and-commit@v9
         with:
           author_name: "github-actions[bot]"
@@ -142,3 +145,5 @@ jobs:
             app/build.gradle
             app/src/main/AndroidManifest.xml
             app/src/main/java/com/yourcompany/marketstub/MarketStubActivity.java
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
