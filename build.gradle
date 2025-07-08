@@ -1,0 +1,12 @@
+plugins {
+  id "com.android.application" version "8.2.0" apply false
+}
+subprojects {
+  repositories {
+    google()
+    mavenCentral()
+  }
+}
+task wrapper(type: Wrapper) {
+  gradleVersion = "8.6"
+}
