@@ -1,10 +1,8 @@
 name: Scaffold MarketStub
 
-# manual trigger
 on:
   workflow_dispatch:
 
-# grant write access to the repo contents
 permissions:
   contents: write
 
@@ -13,13 +11,11 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1) Checkout and keep credentials so we can push commits
-      - name: Checkout repo
+      - name: Checkout repo (with write perms)
         uses: actions/checkout@v4
         with:
           persist-credentials: true
 
-      # 2) Scaffold all stub-app files/dirs
       - name: Scaffold files
         run: |
           set -e
@@ -55,7 +51,7 @@ jobs:
           }
           EOF
 
-          # gradle wrapper props
+          # wrapper properties
           cat > gradle/wrapper/gradle-wrapper.properties << 'EOF'
           distributionBase=GRADLE_USER_HOME
           distributionPath=wrapper/dists
@@ -131,8 +127,7 @@ jobs:
           }
           EOF
 
-      # 3) Commit & push the scaffolded files
-      - name: Commit scaffold
+      - name: Commit scaffolded files
         uses: EndBug/add-and-commit@v9
         with:
           author_name: "github-actions[bot]"
