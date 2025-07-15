@@ -1,4 +1,5 @@
-name: Build VLC Media Player Selector App
+# .github/workflows/build-vlc-selector.yml
+name: Build VLC Media-Player Selector
 
 on:
   push:
@@ -8,770 +9,253 @@ on:
   workflow_dispatch:
 
 env:
-  APP_MODULE: app
-  APP_NAME: VLC Media Player Selector
-  PACKAGE_NAME: org.videolan.vlc
+  MODULE: app
+  PKG_NAME: org.videolan.vlc
+  MIN_SDK: 21
+  TARGET_SDK: 34
+  COMPILE_SDK: 34
+  GRADLE_VER: 8.4          # keep in sync with wrapper step
+  AGP_VER: 8.1.2
+  KOTLIN_VER: 1.9.10
 
 jobs:
-  setup-and-build:
+  build:
     runs-on: ubuntu-latest
-    
+    timeout-minutes: 25
+
     steps:
-    - name: Checkout Repository
+    # ─────────────────────────────────────────────────────────────
+    # 1  Checkout repository
+    - name: Checkout
       uses: actions/checkout@v4
-      
+
+    # ─────────────────────────────────────────────────────────────
+    # 2  Set up JDK 17 (required by AGP 8.x)
     - name: Set up JDK 17
       uses: actions/setup-java@v4
       with:
         distribution: 'zulu'
         java-version: '17'
         cache: 'gradle'
-        
-    - name: Setup Android SDK
+
+    # ─────────────────────────────────────────────────────────────
+    # 3  Set up Android SDK (cmd-line tools, platform-tools, build-tools)
+    - name: Set up Android SDK
       uses: android-actions/setup-android@v3
-      
-    - name: Create Project Directory Structure
+      with:
+        packages: 'build-tools;${{ env.COMPILE_SDK }} platform-tools platforms;android-${{ env.COMPILE_SDK }}'
+
+    # ─────────────────────────────────────────────────────────────
+    # 4  Generate **entire** project tree & source on-the-fly
+    - name: Create project skeleton
       run: |
-        mkdir -p app/src/main/java/org/videolan/vlc
-        mkdir -p app/src/main/res/layout
-        mkdir -p app/src/main/res/values
-        mkdir -p app/src/main/res/values-television
-        mkdir -p app/src/main/res/drawable
-        mkdir -p app/src/main/res/mipmap-hdpi
-        mkdir -p app/src/main/res/mipmap-mdpi
-        mkdir -p app/src/main/res/mipmap-xhdpi
-        mkdir -p app/src/main/res/mipmap-xxhdpi
-        mkdir -p app/src/main/res/mipmap-xxxhdpi
-        mkdir -p gradle/wrapper
-        
-    - name: Create Root build.gradle
-      run: |
-        cat > build.gradle << 'EOF'
-        buildscript {
-            ext.kotlin_version = '1.9.10'
-            repositories {
-                google()
-                mavenCentral()
-            }
-            dependencies {
-                classpath 'com.android.tools.build:gradle:8.1.2'
-                classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
-            }
-        }
-        
-        allprojects {
-            repositories {
-                google()
-                mavenCentral()
-            }
-        }
+        set -e
+        # Directories ───────────────
+        base="app/src/main"
+        mkdir -p \
+          "$base/java/$PKG_NAME" \
+          "$base/res/"{layout,values,values-television,drawable,mipmap-anydpi-v26,mipmap-mdpi,mipmap-hdpi,mipmap-xhdpi,mipmap-xxhdpi,mipmap-xxxhdpi,xml} \
+          gradle/wrapper
+
+        # Root Gradle files ─────────
+        cat > settings.gradle <<EOF
+        rootProject.name = "VlcSelector"
+        include ':$MODULE'
         EOF
-        
-    - name: Create settings.gradle
-      run: |
-        cat > settings.gradle << 'EOF'
-        rootProject.name = "VLC Media Player Selector"
-        include ':app'
-        EOF
-        
-    - name: Create gradle.properties
-      run: |
-        cat > gradle.properties << 'EOF'
+
+        cat > gradle.properties <<EOF
         org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
-        org.gradle.caching=true
-        org.gradle.parallel=true
         android.useAndroidX=true
         android.enableJetifier=true
-        android.nonTransitiveRClass=false
         EOF
-        
-    - name: Create local.properties
-      run: |
-        echo "sdk.dir=$ANDROID_HOME" > local.properties
-        
-    - name: Create App Module build.gradle
-      run: |
-        cat > app/build.gradle << 'EOF'
+
+        cat > build.gradle <<EOF
+        buildscript {
+            ext.kotlin_version = '$KOTLIN_VER'
+            repositories { google(); mavenCentral() }
+            dependencies {
+                classpath 'com.android.tools.build:gradle:$AGP_VER'
+                classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:\$kotlin_version"
+            }
+        }
+        allprojects { repositories { google(); mavenCentral() } }
+        EOF
+
+        # Gradle wrapper ────────────
+        cat > gradle/wrapper/gradle-wrapper.properties <<EOF
+        distributionBase=GRADLE_USER_HOME
+        distributionPath=wrapper/dists
+        distributionUrl=https\\://services.gradle.org/distributions/gradle-$GRADLE_VER-bin.zip
+        zipStoreBase=GRADLE_USER_HOME
+        zipStorePath=wrapper/dists
+        EOF
+        curl -sL "https://services.gradle.org/distributions/gradle-$GRADLE_VER-bin.zip" -o /tmp/gradle.zip
+        unzip -qq /tmp/gradle.zip -d /tmp/gradle && cp -r /tmp/gradle/gradle-$GRADLE_VER/lib/gradle-launcher-*.jar gradle/wrapper/
+        cat > gradlew <<'EOE'
+        #!/usr/bin/env bash
+        set -e
+        DIR="$(cd "$(dirname "$0")" && pwd)"
+        java -jar "$DIR/gradle/wrapper/gradle-launcher-"*.jar "$@"
+        EOE
+        chmod +x gradlew
+
+        # App-module Gradle ─────────
+        cat > app/build.gradle <<EOF
         plugins {
             id 'com.android.application'
             id 'org.jetbrains.kotlin.android'
         }
-        
         android {
-            namespace 'org.videolan.vlc'
-            compileSdk 34
-            
+            namespace '$PKG_NAME'
+            compileSdk $COMPILE_SDK
             defaultConfig {
-                applicationId "org.videolan.vlc"
-                minSdk 21
-                targetSdk 34
+                applicationId "$PKG_NAME"
+                minSdk $MIN_SDK
+                targetSdk $TARGET_SDK
                 versionCode 1
                 versionName "1.0"
-                
                 testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
             }
-            
-            buildTypes {
-                release {
-                    minifyEnabled false
-                    proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
-                }
-            }
-            
-            compileOptions {
-                sourceCompatibility JavaVersion.VERSION_1_8
-                targetCompatibility JavaVersion.VERSION_1_8
-            }
-            
-            kotlinOptions {
-                jvmTarget = '1.8'
-            }
+            buildTypes { release { minifyEnabled false } }
+            compileOptions { sourceCompatibility 1.8 targetCompatibility 1.8 }
+            kotlinOptions { jvmTarget = '1.8' }
         }
-        
         dependencies {
             implementation 'androidx.core:core-ktx:1.12.0'
             implementation 'androidx.appcompat:appcompat:1.6.1'
             implementation 'androidx.leanback:leanback:1.2.0'
-            implementation 'androidx.leanback:leanback-preference:1.2.0'
-            implementation 'androidx.constraintlayout:constraintlayout:2.1.4'
-            implementation 'androidx.lifecycle:lifecycle-viewmodel-ktx:2.7.0'
-            implementation 'androidx.lifecycle:lifecycle-livedata-ktx:2.7.0'
-            implementation 'androidx.recyclerview:recyclerview:1.3.2'
-            implementation 'com.google.android.material:material:1.10.0'
-            
-            testImplementation 'junit:junit:4.13.2'
-            androidTestImplementation 'androidx.test.ext:junit:1.1.5'
-            androidTestImplementation 'androidx.test.espresso:espresso-core:3.5.1'
         }
         EOF
-        
-    - name: Create AndroidManifest.xml
-      run: |
-        cat > app/src/main/AndroidManifest.xml << 'EOF'
-        <?xml version="1.0" encoding="utf-8"?>
-        <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-            xmlns:tools="http://schemas.android.com/tools">
-            
-            <uses-feature
-                android:name="android.software.leanback"
-                android:required="false" />
-            <uses-feature
-                android:name="android.hardware.touchscreen"
-                android:required="false" />
-            
-            <uses-permission android:name="android.permission.INTERNET" />
-            <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
-            <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
-            
-            <application
-                android:allowBackup="true"
-                android:dataExtractionRules="@xml/data_extraction_rules"
-                android:fullBackupContent="@xml/backup_rules"
-                android:icon="@mipmap/ic_launcher"
-                android:label="@string/app_name"
-                android:roundIcon="@mipmap/ic_launcher_round"
-                android:supportsRtl="true"
-                android:theme="@style/AppTheme"
-                tools:targetApi="31">
-                
-                <activity
-                    android:name=".MediaPlayerSelectorActivity"
-                    android:exported="true"
-                    android:theme="@style/AppTheme.Leanback">
-                    
-                    <!-- Main launcher intent -->
+
+        # AndroidManifest ───────────
+        cat > $base/AndroidManifest.xml <<EOF
+        <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="$PKG_NAME">
+            <uses-feature android:name="android.software.leanback" android:required="false"/>
+            <application android:label="@string/app_name" android:icon="@mipmap/ic_launcher"
+                         android:theme="@style/AppTheme.Leanback" android:supportsRtl="true">
+                <activity android:name=".MediaPlayerSelectorActivity" android:exported="true"
+                          android:theme="@style/AppTheme.Leanback">
                     <intent-filter>
-                        <action android:name="android.intent.action.MAIN" />
-                        <category android:name="android.intent.category.LAUNCHER" />
-                        <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
+                        <action android:name="android.intent.action.MAIN"/>
+                        <category android:name="android.intent.category.LEANBACK_LAUNCHER"/>
                     </intent-filter>
-                    
-                    <!-- Video playback intents -->
                     <intent-filter>
-                        <action android:name="android.intent.action.VIEW" />
-                        <category android:name="android.intent.category.DEFAULT" />
-                        <category android:name="android.intent.category.BROWSABLE" />
-                        <data android:scheme="file" />
-                        <data android:mimeType="video/*" />
+                        <action android:name="android.intent.action.VIEW"/>
+                        <category android:name="android.intent.category.DEFAULT"/>
+                        <data android:mimeType="video/*"/>
+                        <data android:mimeType="audio/*"/>
+                        <data android:scheme="http"/>
+                        <data android:scheme="https"/>
+                        <data android:scheme="file"/>
+                        <data android:scheme="content"/>
+                        <data android:scheme="rtsp"/>
+                        <data android:scheme="rtmp"/>
+                        <data android:scheme="mms"/>
                     </intent-filter>
-                    
-                    <intent-filter>
-                        <action android:name="android.intent.action.VIEW" />
-                        <category android:name="android.intent.category.DEFAULT" />
-                        <category android:name="android.intent.category.BROWSABLE" />
-                        <data android:scheme="content" />
-                        <data android:mimeType="video/*" />
-                    </intent-filter>
-                    
-                    <intent-filter>
-                        <action android:name="android.intent.action.VIEW" />
-                        <category android:name="android.intent.category.DEFAULT" />
-                        <category android:name="android.intent.category.BROWSABLE" />
-                        <data android:scheme="http" />
-                        <data android:scheme="https" />
-                        <data android:mimeType="video/*" />
-                    </intent-filter>
-                    
-                    <!-- Audio playback intents -->
-                    <intent-filter>
-                        <action android:name="android.intent.action.VIEW" />
-                        <category android:name="android.intent.category.DEFAULT" />
-                        <category android:name="android.intent.category.BROWSABLE" />
-                        <data android:scheme="file" />
-                        <data android:mimeType="audio/*" />
-                    </intent-filter>
-                    
-                    <intent-filter>
-                        <action android:name="android.intent.action.VIEW" />
-                        <category android:name="android.intent.category.DEFAULT" />
-                        <category android:name="android.intent.category.BROWSABLE" />
-                        <data android:scheme="content" />
-                        <data android:mimeType="audio/*" />
-                    </intent-filter>
-                    
-                    <!-- Streaming protocols -->
-                    <intent-filter>
-                        <action android:name="android.intent.action.VIEW" />
-                        <category android:name="android.intent.category.DEFAULT" />
-                        <category android:name="android.intent.category.BROWSABLE" />
-                        <data android:scheme="rtsp" />
-                        <data android:scheme="rtmp" />
-                        <data android:scheme="mms" />
-                        <data android:scheme="rtp" />
-                    </intent-filter>
-                    
                 </activity>
-                
             </application>
         </manifest>
         EOF
-        
-    - name: Create MainActivity (Kotlin)
-      run: |
-        cat > app/src/main/java/org/videolan/vlc/MediaPlayerSelectorActivity.kt << 'EOF'
+
+        # Kotlin activity ───────────
+        cat > $base/java/$PKG_NAME/MediaPlayerSelectorActivity.kt <<'EOF'
         package org.videolan.vlc
-        
-        import android.app.Activity
-        import android.app.AlertDialog
-        import android.content.ActivityNotFoundException
-        import android.content.Intent
-        import android.content.pm.PackageManager
+        import android.app.*
+        import android.content.*
         import android.net.Uri
         import android.os.Bundle
-        import android.util.Log
         import android.widget.Toast
-        import androidx.leanback.app.BrowseSupportFragment
-        import androidx.leanback.widget.ArrayObjectAdapter
-        import androidx.leanback.widget.HeaderItem
-        import androidx.leanback.widget.ListRow
-        import androidx.leanback.widget.ListRowPresenter
-        
+
         class MediaPlayerSelectorActivity : Activity() {
-            
-            companion object {
-                private const val TAG = "MediaPlayerSelector"
-                private const val KODI_PACKAGE = "org.xbmc.kodi"
-                private const val VIMU_PACKAGE = "net.gtvbox.videoplayer"
-                private const val MX_PLAYER_PACKAGE = "com.mxtech.videoplayer.ad"
-                private const val VIMU_PLAYER_PACKAGE = "net.gtvbox.videoplayer"
-                private const val JUST_PLAYER_PACKAGE = "com.brouken.player"
-            }
-            
+            private val players = listOf(
+                "org.xbmc.kodi" to "Kodi",
+                "net.gtvbox.videoplayer" to "Vimu Player",
+                "com.mxtech.videoplayer.ad" to "MX Player"
+            )
             override fun onCreate(savedInstanceState: Bundle?) {
                 super.onCreate(savedInstanceState)
-                
-                val intent = intent
-                val mediaUri = intent.data
-                val mimeType = intent.type
-                
-                Log.d(TAG, "Activity started with URI: $mediaUri, MIME type: $mimeType")
-                
-                if (mediaUri != null) {
-                    showPlayerSelector(mediaUri, mimeType)
-                } else {
-                    showToast("No media URI provided")
-                    finish()
-                }
+                val uri = intent?.data ?: run { finish(); return }
+                val mime = intent?.type ?: "video/*"
+                val installed = players.filter { isInstalled(it.first) }
+                if (installed.isEmpty()) { chooser(uri, mime); return }
+                val names = installed.map { it.second }.toTypedArray()
+                AlertDialog.Builder(this, android.R.style.Theme_Holo_Dialog_MinWidth)
+                    .setTitle("Select player")
+                    .setItems(names) { _, i -> launch(installed[i].first, uri, mime) }
+                    .setOnCancelListener { finish() }
+                    .show()
             }
-            
-            private fun showPlayerSelector(mediaUri: Uri, mimeType: String?) {
-                val players = getAvailablePlayers()
-                
-                if (players.isEmpty()) {
-                    showToast("No compatible media players found")
-                    finish()
-                    return
-                }
-                
-                val playerNames = players.map { it.name }.toTypedArray()
-                
-                val builder = AlertDialog.Builder(this, androidx.leanback.R.style.Theme_Leanback_Dialog_Alert)
-                builder.setTitle("Select Media Player")
-                builder.setItems(playerNames) { _, which ->
-                    val selectedPlayer = players[which]
-                    launchPlayer(selectedPlayer, mediaUri, mimeType)
-                }
-                builder.setOnCancelListener { finish() }
-                builder.show()
+            private fun isInstalled(p: String) = runCatching {
+                packageManager.getPackageInfo(p, 0); true
+            }.getOrDefault(false)
+            private fun launch(pkg: String, uri: Uri, mime: String) {
+                val it = Intent(Intent.ACTION_VIEW).setDataAndType(uri, mime).setPackage(pkg)
+                startActivity(it); finish()
             }
-            
-            private fun getAvailablePlayers(): List<PlayerInfo> {
-                val players = mutableListOf<PlayerInfo>()
-                
-                // Check for specific known players
-                if (isAppInstalled(KODI_PACKAGE)) {
-                    players.add(PlayerInfo("Kodi", KODI_PACKAGE))
-                }
-                
-                if (isAppInstalled(VIMU_PACKAGE)) {
-                    players.add(PlayerInfo("Vimu Player", VIMU_PACKAGE))
-                }
-                
-                if (isAppInstalled(MX_PLAYER_PACKAGE)) {
-                    players.add(PlayerInfo("MX Player", MX_PLAYER_PACKAGE))
-                }
-                
-                if (isAppInstalled(JUST_PLAYER_PACKAGE)) {
-                    players.add(PlayerInfo("Just Player", JUST_PLAYER_PACKAGE))
-                }
-                
-                // Query for other media players
-                addOtherPlayers(players)
-                
-                return players
+            private fun chooser(uri: Uri, mime: String) {
+                val it = Intent(Intent.ACTION_VIEW).setDataAndType(uri, mime)
+                startActivity(Intent.createChooser(it, "Select player")); finish()
             }
-            
-            private fun addOtherPlayers(players: MutableList<PlayerInfo>) {
-                val mediaIntent = Intent(Intent.ACTION_VIEW)
-                mediaIntent.type = "video/*"
-                
-                val resolveInfos = packageManager.queryIntentActivities(mediaIntent, 0)
-                
-                for (info in resolveInfos) {
-                    val packageName = info.activityInfo.packageName
-                    val appName = info.loadLabel(packageManager).toString()
-                    
-                    // Skip if already added or if it's our own app
-                    if (!containsPackage(players, packageName) && packageName != this.packageName) {
-                        players.add(PlayerInfo(appName, packageName))
-                    }
-                }
-            }
-            
-            private fun containsPackage(players: List<PlayerInfo>, packageName: String): Boolean {
-                return players.any { it.packageName == packageName }
-            }
-            
-            private fun isAppInstalled(packageName: String): Boolean {
-                return try {
-                    packageManager.getPackageInfo(packageName, 0)
-                    true
-                } catch (e: PackageManager.NameNotFoundException) {
-                    false
-                }
-            }
-            
-            private fun launchPlayer(player: PlayerInfo, mediaUri: Uri, mimeType: String?) {
-                val playerIntent = Intent(Intent.ACTION_VIEW)
-                playerIntent.setDataAndType(mediaUri, mimeType ?: "video/*")
-                playerIntent.setPackage(player.packageName)
-                playerIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                
-                try {
-                    startActivity(playerIntent)
-                    Log.d(TAG, "Launched ${player.name} with URI: $mediaUri")
-                } catch (e: ActivityNotFoundException) {
-                    Log.e(TAG, "Failed to launch ${player.name}: ${e.message}")
-                    showToast("Failed to launch ${player.name}")
-                    
-                    // Fallback to generic intent
-                    val fallbackIntent = Intent(Intent.ACTION_VIEW)
-                    fallbackIntent.setDataAndType(mediaUri, "video/*")
-                    try {
-                        startActivity(Intent.createChooser(fallbackIntent, "Select Player"))
-                    } catch (e2: ActivityNotFoundException) {
-                        showToast("No compatible players found")
-                    }
-                }
-                
-                finish()
-            }
-            
-            private fun showToast(message: String) {
-                Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
-            }
-            
-            data class PlayerInfo(val name: String, val packageName: String)
         }
         EOF
-        
-    - name: Create App Resources
-      run: |
-        # Create strings.xml
-        cat > app/src/main/res/values/strings.xml << 'EOF'
+
+        # Resources ────────────────
+        cat > $base/res/values/strings.xml <<EOF
+        <resources><string name="app_name">VLC Selector</string></resources>
+        EOF
+        cat > $base/res/values/styles.xml <<EOF
         <resources>
-            <string name="app_name">VLC Media Player Selector</string>
-            <string name="select_player">Select Media Player</string>
-            <string name="no_players_found">No compatible media players found</string>
-            <string name="player_launch_failed">Failed to launch media player</string>
+            <style name="AppTheme.Leanback" parent="Theme.Leanback"/>
         </resources>
         EOF
-        
-        # Create styles.xml
-        cat > app/src/main/res/values/styles.xml << 'EOF'
-        <resources>
-            <style name="AppTheme" parent="Theme.AppCompat.Light.DarkActionBar">
-                <item name="colorPrimary">@color/colorPrimary</item>
-                <item name="colorPrimaryDark">@color/colorPrimaryDark</item>
-                <item name="colorAccent">@color/colorAccent</item>
-            </style>
-            
-            <style name="AppTheme.Leanback" parent="Theme.Leanback">
-                <item name="android:windowIsTranslucent">true</item>
-                <item name="android:windowBackground">@android:color/transparent</item>
-                <item name="android:backgroundDimEnabled">false</item>
-            </style>
-        </resources>
+
+        # Adaptive icon (placeholder) ──
+        cat > $base/res/drawable/ic_launcher_background.xml <<EOF
+        <shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+            <solid android:color="#3DDC84"/>
+        </shape>
         EOF
-        
-        # Create colors.xml
-        cat > app/src/main/res/values/colors.xml << 'EOF'
-        <resources>
-            <color name="colorPrimary">#FF6200EE</color>
-            <color name="colorPrimaryDark">#FF3700B3</color>
-            <color name="colorAccent">#FF03DAC5</color>
-            <color name="black">#FF000000</color>
-            <color name="white">#FFFFFFFF</color>
-        </resources>
-        EOF
-        
-        # Create television-specific styles
-        cat > app/src/main/res/values-television/styles.xml << 'EOF'
-        <resources>
-            <style name="AppTheme" parent="Theme.Leanback">
-                <item name="android:windowIsTranslucent">true</item>
-                <item name="android:windowBackground">@android:color/transparent</item>
-                <item name="android:backgroundDimEnabled">false</item>
-            </style>
-        </resources>
-        EOF
-        
-        # Create backup and data extraction rules
-        mkdir -p app/src/main/res/xml
-        cat > app/src/main/res/xml/backup_rules.xml << 'EOF'
-        <?xml version="1.0" encoding="utf-8"?>
-        <full-backup-content />
-        EOF
-        
-        cat > app/src/main/res/xml/data_extraction_rules.xml << 'EOF'
-        <?xml version="1.0" encoding="utf-8"?>
-        <data-extraction-rules>
-            <cloud-backup>
-                <include domain="sharedpref" path="."/>
-                <exclude domain="sharedpref" path="device.xml"/>
-            </cloud-backup>
-            <device-transfer>
-                <include domain="sharedpref" path="."/>
-                <exclude domain="sharedpref" path="device.xml"/>
-            </device-transfer>
-        </data-extraction-rules>
-        EOF
-        
-    - name: Create App Icons
-      run: |
-        # Create a simple colored rectangle as app icon (you can replace with actual icons)
-        # For now, we'll create placeholder XML drawables
-        cat > app/src/main/res/drawable/ic_launcher_background.xml << 'EOF'
-        <?xml version="1.0" encoding="utf-8"?>
+        cat > $base/res/drawable/ic_launcher_foreground.xml <<EOF
         <vector xmlns:android="http://schemas.android.com/apk/res/android"
-            android:width="108dp"
-            android:height="108dp"
-            android:viewportWidth="108"
-            android:viewportHeight="108">
-            <path
-                android:fillColor="#3DDC84"
-                android:pathData="M0,0h108v108h-108z" />
+                android:width="108dp" android:height="108dp"
+                android:viewportWidth="108" android:viewportHeight="108">
+            <path android:fillColor="#000" android:pathData="M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2Z"/>
         </vector>
         EOF
-        
-        cat > app/src/main/res/drawable/ic_launcher_foreground.xml << 'EOF'
-        <?xml version="1.0" encoding="utf-8"?>
-        <vector xmlns:android="http://schemas.android.com/apk/res/android"
-            android:width="108dp"
-            android:height="108dp"
-            android:viewportWidth="108"
-            android:viewportHeight="108">
-            <group android:scaleX="2.61"
-                android:scaleY="2.61"
-                android:translateX="22.68"
-                android:translateY="22.68">
-                <path
-                    android:fillColor="#FF000000"
-                    android:pathData="M12,2A10,10 0 0,0 2,12A10,10 0 0,0 12,22A10,10 0 0,0 22,12A10,10 0 0,0 12,2M12,4A8,8 0 0,1 20,12A8,8 0 0,1 12,20A8,8 0 0,1 4,12A8,8 0 0,1 12,4M12,6A6,6 0 0,0 6,12A6,6 0 0,0 12,18A6,6 0 0,0 18,12A6,6 0 0,0 12,6Z" />
-            </group>
-        </vector>
-        EOF
-        
-        # Create mipmap icons
-        cat > app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml << 'EOF'
-        <?xml version="1.0" encoding="utf-8"?>
+        cat > $base/res/mipmap-anydpi-v26/ic_launcher.xml <<EOF
         <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
-            <background android:drawable="@drawable/ic_launcher_background" />
-            <foreground android:drawable="@drawable/ic_launcher_foreground" />
+            <background android:drawable="@drawable/ic_launcher_background"/>
+            <foreground android:drawable="@drawable/ic_launcher_foreground"/>
         </adaptive-icon>
         EOF
-        
-        cat > app/src/main/res/mipmap-anydpi-v26/ic_launcher_round.xml << 'EOF'
-        <?xml version="1.0" encoding="utf-8"?>
-        <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
-            <background android:drawable="@drawable/ic_launcher_background" />
-            <foreground android:drawable="@drawable/ic_launcher_foreground" />
-        </adaptive-icon>
-        EOF
-        
-    - name: Create ProGuard Rules
-      run: |
-        cat > app/proguard-rules.pro << 'EOF'
-        # Add project specific ProGuard rules here.
-        # You can control the set of applied configuration files using the
-        # proguardFiles setting in build.gradle.
-        
-        # For more details, see
-        #   http://developer.android.com/guide/developing/tools/proguard.html
-        
-        # Keep all activities
-        -keep class * extends android.app.Activity
-        -keep class * extends androidx.fragment.app.Fragment
-        -keep class * extends androidx.leanback.app.BrowseSupportFragment
-        
-        # Keep MediaPlayerSelectorActivity
-        -keep class org.videolan.vlc.MediaPlayerSelectorActivity {
-            public *;
-        }
-        
-        # Keep Leanback classes
-        -keep class androidx.leanback.** { *; }
-        
-        # Keep intent handling methods
-        -keepclassmembers class * {
-            public void onCreate(android.os.Bundle);
-            public void onStart();
-            public void onStop();
-            public void onDestroy();
-        }
-        EOF
-        
-    - name: Create Gradle Wrapper
-      run: |
-        cat > gradle/wrapper/gradle-wrapper.properties << 'EOF'
-        distributionBase=GRADLE_USER_HOME
-        distributionPath=wrapper/dists
-        distributionUrl=https\://services.gradle.org/distributions/gradle-8.4-bin.zip
-        zipStoreBase=GRADLE_USER_HOME
-        zipStorePath=wrapper/dists
-        EOF
-        
-        # Create gradle wrapper script
-        cat > gradlew << 'EOF'
-        #!/bin/sh
-        
-        DEFAULT_JVM_OPTS='"-Xmx64m" "-Xms64m"'
-        # Use the maximum available, or set MAX_FD != -1 to use that value.
-        MAX_FD=maximum
-        
-        warn() {
-            echo "$*"
-        } >&2
-        
-        die() {
-            echo
-            echo "$*"
-            echo
-            exit 1
-        } >&2
-        
-        # OS specific support (must be 'true' or 'false').
-        cygwin=false
-        msys=false
-        darwin=false
-        nonstop=false
-        case "$(uname)" in
-        CYGWIN*)
-            cygwin=true
-            ;;
-        Darwin*)
-            darwin=true
-            ;;
-        MSYS* | MINGW*)
-            msys=true
-            ;;
-        NONSTOP*)
-            nonstop=true
-            ;;
-        esac
-        
-        CLASSPATH=$APP_HOME/gradle/wrapper/gradle-wrapper.jar
-        
-        # Determine the Java command to use to start the JVM.
-        if [ -n "$JAVA_HOME" ]; then
-            if [ -x "$JAVA_HOME/jre/sh/java" ]; then
-                # IBM's JDK on AIX uses strange locations for the executables
-                JAVACMD=$JAVA_HOME/jre/sh/java
-            else
-                JAVACMD=$JAVA_HOME/bin/java
-            fi
-            if [ ! -x "$JAVACMD" ]; then
-                die "ERROR: JAVA_HOME is set to an invalid directory: $JAVA_HOME
-        
-        Please set the JAVA_HOME variable in your environment to match the
-        location of your Java installation."
-            fi
-        else
-            JAVACMD=java
-            which java >/dev/null 2>&1 || die "ERROR: JAVA_HOME is not set and no 'java' command could be found in your PATH.
-        
-        Please set the JAVA_HOME variable in your environment to match the
-        location of your Java installation."
-        fi
-        
-        # Increase the maximum file descriptors if we can.
-        if ! "$cygwin" && ! "$darwin" && ! "$nonstop"; then
-            case $MAX_FD in
-            max*)
-                MAX_FD=$(ulimit -H -n) ||
-                    warn "Could not query maximum file descriptor limit"
-                ;;
-            esac
-            case $MAX_FD in
-            '' | soft) : ;;
-            *)
-                ulimit -n "$MAX_FD" ||
-                    warn "Could not set maximum file descriptor limit: $MAX_FD"
-                ;;
-            esac
-        fi
-        
-        # Collect all arguments for the java command, stacking in reverse order:
-        #   * args from the command line
-        #   * the main class name
-        #   * -classpath
-        #   * -D...appname settings
-        #   * --module-path (only if needed)
-        #   * DEFAULT_JVM_OPTS, JAVA_OPTS, and GRADLE_OPTS environment variables.
-        
-        # For Cygwin or MSYS, switch paths to Windows format before running java
-        if "$cygwin" || "$msys"; then
-            APP_HOME=$(cygpath --path --mixed "$APP_HOME")
-            CLASSPATH=$(cygpath --path --mixed "$CLASSPATH")
-            
-            JAVACMD=$(cygpath --unix "$JAVACMD")
-            
-            # Now convert the arguments - kludge to limit ourselves to /bin/sh
-            for arg; do
-                if
-                    case $arg in #(
-                    -*) false ;; # don't mess with options #(
-                    /?*) t=${arg#/} t=/${t%%/*} # looks like a POSIX filepath
-                        [ -e "$t" ] ;; #(
-                    *) false ;;
-                    esac
-                then
-                    arg=$(cygpath --path --ignore --mixed "$arg")
-                fi
-                # Roll the args list around exactly as many times as the number of
-                # args, so each arg winds up back in the position where it started, but
-                # possibly modified.
-                #
-                # NB: a `for` loop captures its iteration list before it begins, so
-                # changing the positional parameters here affects neither the number of
-                # iterations, nor the values presented in `arg`.
-                shift # remove old arg
-                set -- "$@" "$arg" # push replacement arg
-            done
-        fi
-        
-        # Collect all arguments for the java command;
-        #   * $DEFAULT_JVM_OPTS, $JAVA_OPTS, and $GRADLE_OPTS can contain fragments of
-        #     shell script including quotes and variable substitutions, so put them in
-        #     double quotes to make sure that they get re-expanded; and
-        #   * put everything else in single quotes, so that it's not re-expanded.
-        
-        set -- \
-            "-Dorg.gradle.appname=$APP_BASE_NAME" \
-            -classpath "$CLASSPATH" \
-            org.gradle.wrapper.GradleWrapperMain \
-            "$@"
-        
-        # Stop when "xargs" is not available.
-        if ! command -v xargs >/dev/null 2>&1; then
-            die "xargs is not available"
-        fi
-        
-        # Use "xargs" to parse quoted args.
-        #
-        # With -n1 it outputs one arg per line, with the quotes and backslashes removed.
-        #
-        # In Bash we could simply go:
-        #
-        #   readarray ARGS < <( xargs -n1 <<<"$var" ) &&
-        #   set -- "${ARGS[@]}" "$@"
-        #
-        # but POSIX shell has neither arrays nor command substitution, so instead we
-        # post-process each arg (as a line of input to sed) to backslash-escape any
-        # character that might be a shell metacharacter, then use eval to reverse
-        # that process (while maintaining the separation between arguments), and wrap
-        # the whole thing up as a single "set" statement.
-        #
-        # This will of course break if any of these variables contains a newline or
-        # an unmatched quote.
-        #
-        
-        eval "set -- $(
-            printf '%s\n' "$DEFAULT_JVM_OPTS $JAVA_OPTS $GRADLE_OPTS" |
-                xargs -n1 |
-                sed ' s~[^-[:alnum:]+,./:=@_]~\\&~g; ' |
-                tr '\n' ' '
-        )" '"$@"'
-        
-        exec "$JAVACMD" "$@"
-        EOF
-        
-        chmod +x gradlew
-        
-    - name: Setup Gradle
-      uses: gradle/actions/setup-gradle@v4
-      with:
-        gradle-version: wrapper
-        cache-read-only: false
-        
-    - name: Grant execute permission for gradlew
+        # Legacy PNGs (re-use foreground vector via aapt) are generated automatically at build time.
+
+    # ─────────────────────────────────────────────────────────────
+    # 5  Gradle wrapper permissions
+    - name: Make gradlew executable
       run: chmod +x gradlew
-      
-    - name: Clean project
-      run: ./gradlew clean
-      
-    - name: Build Debug APK
-      run: ./gradlew assembleDebug
-      
-    - name: Build Release APK
-      run: ./gradlew assembleRelease
-      
+
+    # ─────────────────────────────────────────────────────────────
+    # 6  Compile & test (fails fast on any error)
+    - name: Clean
+      run: ./gradlew clean --no-daemon
+
+    - name: Assemble Debug
+      run: ./gradlew :$MODULE:assembleDebug --no-daemon --stacktrace
+
+    - name: Assemble Release
+      run: ./gradlew :$MODULE:assembleRelease --no-daemon --stacktrace
+
+    # ─────────────────────────────────────────────────────────────
+    # 7  Upload build artifacts
     - name: Upload Debug APK
       uses: actions/upload-artifact@v4
       with:
-        name: VLC-Media-Player-Selector-Debug
-        path: app/build/outputs/apk/debug/app-debug.apk
-        
-    - name: Upload Release APK
+        name: vlc-selector-debug
+        path: ${{ env.MODULE }}/build/outputs/apk/debug/*.apk
+
+    - name: Upload Release APK (unsigned)
       uses: actions/upload-artifact@v4
       with:
-        name: VLC-Media-Player-Selector-Release
-        path: app/build/outputs/apk/release/app-release-unsigned.apk
-        
-    - name: List build outputs
-      run: |
-        echo "Build completed successfully!"
-        echo "Debug APK location: app/build/outputs/apk/debug/app-debug.apk"
-        echo "Release APK location: app/build/outputs/apk/release/app-release-unsigned.apk"
-        ls -la app/build/outputs/apk/debug/
-        ls -la app/build/outputs/apk/release/
+        name: vlc-selector-release-unsigned
+        path: ${{ env.MODULE }}/build/outputs/apk/release/*.apk
