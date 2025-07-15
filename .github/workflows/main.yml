@@ -1,0 +1,166 @@
+name: Build VLC Redirector App
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    name: Generate & Build APK
+
+    steps:
+      - name: Set up JDK 17
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'temurin'
+          java-version: 17
+
+      - name: Create project structure
+        run: |
+          mkdir -p app/src/main/java/org/videolan/vlc
+          mkdir -p app/src/main/res/values
+          mkdir -p .github/workflows
+
+          cat > settings.gradle <<EOF
+          rootProject.name = 'vlc-redirector'
+          include ':app'
+          EOF
+
+          cat > build.gradle <<EOF
+          buildscript {
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+              dependencies {
+                  classpath 'com.android.tools.build:gradle:8.0.2'
+              }
+          }
+          plugins {
+              id 'com.android.application' version '8.0.2' apply false
+          }
+          EOF
+
+          cat > app/build.gradle <<EOF
+          plugins {
+              id 'com.android.application'
+              id 'kotlin-android'
+          }
+
+          android {
+              namespace 'org.videolan.vlc'
+              compileSdk 34
+
+              defaultConfig {
+                  applicationId "org.videolan.vlc"
+                  minSdk 21
+                  targetSdk 34
+                  versionCode 1
+                  versionName "1.0"
+              }
+
+              buildTypes {
+                  release {
+                      minifyEnabled false
+                      proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+                  }
+              }
+
+              compileOptions {
+                  sourceCompatibility JavaVersion.VERSION_17
+                  targetCompatibility JavaVersion.VERSION_17
+              }
+
+              kotlinOptions {
+                  jvmTarget = '17'
+              }
+          }
+
+          dependencies {
+              implementation "androidx.appcompat:appcompat:1.6.1"
+              implementation "org.jetbrains.kotlin:kotlin-stdlib:1.9.0"
+          }
+          EOF
+
+          cat > app/src/main/AndroidManifest.xml <<EOF
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android"
+              package="org.videolan.vlc">
+
+              <application
+                  android:label="VLC Redirector"
+                  android:theme="@style/Theme.AppCompat.Light.NoActionBar">
+
+                  <activity android:name=".VlcRedirectActivity">
+                      <intent-filter>
+                          <action android:name="org.videolan.vlc.player.result" />
+                          <action android:name="android.intent.action.VIEW" />
+                          <category android:name="android.intent.category.DEFAULT" />
+                          <data android:mimeType="video/*" />
+                      </intent-filter>
+                  </activity>
+              </application>
+
+          </manifest>
+          EOF
+
+          cat > app/src/main/java/org/videolan/vlc/VlcRedirectActivity.kt <<EOF
+          package org.videolan.vlc
+
+          import android.content.Intent
+          import android.net.Uri
+          import android.os.Bundle
+          import android.widget.Toast
+          import androidx.appcompat.app.AppCompatActivity
+
+          class VlcRedirectActivity : AppCompatActivity() {
+              override fun onCreate(savedInstanceState: Bundle?) {
+                  super.onCreate(savedInstanceState)
+
+                  val videoUri: Uri? = intent?.data
+
+                  if (videoUri == null) {
+                      Toast.makeText(this, "No video URI found", Toast.LENGTH_SHORT).show()
+                      finish()
+                      return
+                  }
+
+                  val viewIntent = Intent(Intent.ACTION_VIEW).apply {
+                      setDataAndType(videoUri, "video/*")
+                      addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                  }
+
+                  val chooser = Intent.createChooser(viewIntent, "Play video with...")
+                  startActivity(chooser)
+                  finish()
+              }
+          }
+          EOF
+
+          cat > app/src/main/res/values/styles.xml <<EOF
+          <resources>
+              <style name="Theme.AppCompat.Light.NoActionBar" parent="Theme.AppCompat.Light.DarkActionBar">
+                  <item name="windowActionBar">false</item>
+                  <item name="windowNoTitle">true</item>
+              </style>
+          </resources>
+          EOF
+
+          cat > gradle.properties <<EOF
+          org.gradle.jvmargs=-Xmx2048m
+          EOF
+
+      - name: Init Gradle Wrapper
+        run: |
+          gradle wrapper --gradle-version=8.2 --distribution-type=all
+
+      - name: Grant execute permissions
+        run: chmod +x ./gradlew
+
+      - name: Build APK
+        run: ./gradlew assembleDebug
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v3
+        with:
+          name: vlc-redirector-apk
+          path: app/build/outputs/apk/debug/app-debug.apk
